@@ -165,7 +165,7 @@ function Home({ onLoad, onDemo }) {
         onDrop={e => { e.preventDefault(); setDrag(false); h(e.dataTransfer.files[0]); }}
         onClick={() => fr.current?.click()}>
         <input ref={fr} type="file" accept=".txt" style={{ display: "none" }} onChange={e => h(e.target.files[0])} />
-        <div style={{ fontSize: 40, marginBottom: 12 }}>📁</div>
+        <div style={{ fontSize: 30, marginBottom: 8 }}>📁</div>
         <p style={{ fontSize: 16, fontWeight: 600, color: C.text, margin: "0 0 4px" }}>LINEトーク履歴をアップロード</p>
         <p style={{ fontSize: 13, color: C.textSub, margin: 0 }}>.txt ファイルをタップして選択</p>
       </div>
@@ -373,125 +373,101 @@ function PartialMaskModal({ msg, existing, onSave, onClose }) {
 }
 
 // ======================================================================
-//  STEP 2: EDIT
+//  TEXT EDIT MODAL
 // ======================================================================
-function EditPage({ messages, selfName, participants, onBack, onPreview }) {
-  const [nameMap, setNameMap] = useState(() => { const m = {}; participants.forEach(p => { m[p] = p; }); return m; });
-  const [mFull, setMFull] = useState(new Set());
-  const [mPart, setMPart] = useState({});
-  const [photos, setPhotos] = useState({});
-  const [bgPreset, setBgPreset] = useState(BG_PRESETS.find(b => b.id === "craft") || BG_PRESETS[0]);
-  const [bubbleColors, setBubbleColors] = useState(() => {
-    const m = {}; participants.forEach(p => { m[p] = p === selfName ? "#DCF8C6" : "#FFFFFF"; }); return m;
-  });
-  const [showTs, setShowTs] = useState(true);
-  const [editingName, setEditingName] = useState(null);
-  const [nameInput, setNameInput] = useState("");
-  const [maskMode, setMaskMode] = useState("full");
-  const [partialTarget, setPartialTarget] = useState(null);
-  const [tab, setTab] = useState("mask");
-  const [editingBubble, setEditingBubble] = useState(null);
-  const photoRef = useRef(null);
-  const [photoTarget, setPhotoTarget] = useState(null);
+function TextEditModal({ msg, editedTexts, onSave, onClose }) {
+  const [text, setText] = useState(editedTexts[msg.id] !== undefined ? editedTexts[msg.id] : msg.text);
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.modal} onClick={e => e.stopPropagation()}>
+        <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700, color: C.text }}>✏️ テキスト編集</h3>
+        <p style={{ fontSize: 12, color: C.textSub, margin: "0 0 12px" }}>メッセージ内容を変更</p>
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={4}
+          style={{ ...S.editInput, resize: "vertical", minHeight: 80, fontFamily: "inherit", lineHeight: 1.5 }} autoFocus />
+        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+          <button style={{ ...S.clearBtn, flex: 1 }} onClick={onClose}>キャンセル</button>
+          <button style={{ ...S.priBtn, flex: 1 }} onClick={() => { onSave(msg.id, text); onClose(); }}>保存</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  const dn = n => nameMap[n] || n;
-  const toggleFullMask = id => {
-    setMPart(p => { const n = { ...p }; delete n[id]; return n; });
-    setMFull(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  };
-  const handlePhotoSelect = e => {
-    const f = e.target.files[0]; if (!f || !photoTarget) return;
-    const r = new FileReader();
-    r.onload = ev => { setPhotos(p => ({ ...p, [photoTarget]: ev.target.result })); setPhotoTarget(null); };
-    r.readAsDataURL(f);
-  };
-  const handleMsgTap = msg => { maskMode === "full" ? toggleFullMask(msg.id) : setPartialTarget(msg); };
-  const savePartialMask = ranges => {
-    if (!partialTarget) return;
-    setMFull(p => { const n = new Set(p); n.delete(partialTarget.id); return n; });
-    if (ranges.length > 0) setMPart(p => ({ ...p, [partialTarget.id]: ranges }));
-    else setMPart(p => { const n = { ...p }; delete n[partialTarget.id]; return n; });
-    setPartialTarget(null);
-  };
+// ======================================================================
+//  ACTION SHEET (LINE-style bottom sheet for message actions)
+// ======================================================================
+function ActionSheet({ msg, mFull, mPart, onEdit, onFullMask, onPartialMask, onUnmask, onClose }) {
+  const isMF = mFull.has(msg.id);
+  const isMP = mPart[msg.id] && mPart[msg.id].length > 0;
+  const isMasked = isMF || isMP;
+
+  const actions = [
+    { icon: "✏️", label: "編集する", sub: "テキストを変更", action: () => { onEdit(msg); onClose(); } },
+  ];
+  if (isMasked) {
+    actions.push({ icon: "🔓", label: "モザイク解除", sub: "元に戻す", action: () => { onUnmask(msg.id); onClose(); }, danger: true });
+  } else {
+    actions.push({ icon: "🔒", label: "全文隠す", sub: "メッセージ全体をモザイク", action: () => { onFullMask(msg.id); onClose(); } });
+    actions.push({ icon: "🔒", label: "部分的に隠す", sub: "一部分だけモザイク", action: () => { onPartialMask(msg); onClose(); } });
+  }
 
   return (
-    <div style={S.page}>
-      <div style={S.header}><button style={S.back} onClick={onBack}>←</button>
-        <div style={{ textAlign: "center", flex: 1 }}><h2 style={S.hT}>編集</h2><span style={{ fontSize: 11, color: C.textLight }}>STEP 2</span></div>
-        <div style={{ width: 40 }} /></div>
-
-      {/* Name edit bar */}
-      <div style={{ padding: "10px 14px", backgroundColor: C.bgDark, borderBottom: `1px solid ${C.border}` }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: C.textSub, marginBottom: 6 }}>✏️ 表示名</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {participants.map(p => (
-            <button key={p} onClick={() => { setEditingName(p); setNameInput(nameMap[p] || p); }}
-              style={{ padding: "5px 10px", borderRadius: 8, border: `1px solid ${C.border}`, backgroundColor: nameMap[p] !== p ? C.accentBg : C.card, fontSize: 12, cursor: "pointer", color: C.text }}>
-              {nameMap[p] !== p ? `${nameMap[p]} ← ${p}` : p}
-            </button>
-          ))}
+    <div style={{ position: "fixed", inset: 0, zIndex: 100 }} onClick={onClose}>
+      <div style={{ position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.3)" }} />
+      <div style={{
+        position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480,
+        backgroundColor: C.card, borderRadius: "20px 20px 0 0", padding: "8px 0 20px",
+        animation: "slideUp 0.25s ease-out"
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: C.border, margin: "0 auto 12px" }} />
+        <div style={{ padding: "0 16px 8px", borderBottom: `1px solid ${C.border}`, marginBottom: 4 }}>
+          <div style={{ fontSize: 13, color: C.textSub, lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {msg.text.slice(0, 40)}{msg.text.length > 40 ? "..." : ""}
+          </div>
         </div>
+        {actions.map((a, i) => (
+          <button key={i} onClick={a.action} style={{
+            display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "12px 20px",
+            background: "none", border: "none", cursor: "pointer", textAlign: "left",
+            transition: "background-color 0.1s"
+          }}>
+            <span style={{ fontSize: 20 }}>{a.icon}</span>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: a.danger ? C.danger : C.text }}>{a.label}</div>
+              <div style={{ fontSize: 12, color: C.textSub, marginTop: 1 }}>{a.sub}</div>
+            </div>
+          </button>
+        ))}
+        <button onClick={onClose} style={{
+          display: "block", width: "calc(100% - 32px)", margin: "8px 16px 0", padding: "12px",
+          backgroundColor: C.bgDark, border: `1px solid ${C.border}`, borderRadius: 12,
+          fontSize: 14, fontWeight: 600, color: C.textSub, cursor: "pointer", textAlign: "center"
+        }}>キャンセル</button>
       </div>
+    </div>
+  );
+}
 
-      {/* Tabs */}
-      <div style={{ display: "flex", borderBottom: `2px solid ${C.border}` }}>
-        <button onClick={() => setTab("mask")} style={{ ...S.tabBtn, borderBottom: tab === "mask" ? `2px solid ${C.accent}` : "2px solid transparent", color: tab === "mask" ? C.accent : C.textLight }}>🔒 モザイク・画像追加</button>
-        <button onClick={() => setTab("style")} style={{ ...S.tabBtn, borderBottom: tab === "style" ? `2px solid ${C.accent}` : "2px solid transparent", color: tab === "style" ? C.accent : C.textLight }}>🎨 スタイル</button>
-      </div>
+// ======================================================================
+//  STYLE BOTTOM SHEET
+// ======================================================================
+function StyleSheet({ bgPreset, setBgPreset, bubbleColors, setBubbleColors, showTs, setShowTs, participants, nameMap, onClose }) {
+  const dn = n => nameMap[n] || n;
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 90 }} onClick={onClose}>
+      <div style={{ position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.3)" }} />
+      <div style={{
+        position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480,
+        maxHeight: "60vh", backgroundColor: C.card, borderRadius: "20px 20px 0 0", padding: "8px 0 24px",
+        overflowY: "auto", animation: "slideUp 0.25s ease-out"
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: C.border, margin: "0 auto 14px" }} />
+        <div style={{ padding: "0 16px" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: "0 0 14px" }}>🎨 スタイル設定</h3>
 
-      {tab === "mask" && <>
-        <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${C.border}` }}>
-          <button onClick={() => setMaskMode("full")} style={{ ...S.modeBtn, backgroundColor: maskMode === "full" ? C.dangerBg : C.card, color: maskMode === "full" ? C.danger : C.textLight }}>全文モザイク</button>
-          <button onClick={() => setMaskMode("partial")} style={{ ...S.modeBtn, backgroundColor: maskMode === "partial" ? "#FFF3E0" : C.card, color: maskMode === "partial" ? "#C46A00" : C.textLight }}>部分モザイク</button>
-        </div>
-        <div style={{ fontSize: 11, color: bgPreset.sub || C.textLight, textAlign: "center", padding: "5px 12px", backgroundColor: bgPreset.bg }}>
-          {maskMode === "full" ? "タップで会話文をモザイク（名前はそのまま）" : "タップで文中の一部をモザイク選択"} | 長押しで画像追加
-        </div>
-        <div style={{ flex: 1, overflowY: "auto", paddingBottom: 80, backgroundColor: bgPreset.bg, transition: "background-color 0.3s" }}>
-          {(() => { let ld = "", lu = ""; return messages.map(msg => {
-            const sd = msg.date !== ld, su = msg.userName !== lu || sd; ld = msg.date; lu = msg.userName;
-            const isSelf = msg.userName === selfName;
-            const isMF = mFull.has(msg.id), isMP = mPart[msg.id] && mPart[msg.id].length > 0, isMasked = isMF || isMP;
-            const nc = gnc(msg.userName, participants); const photo = photos[msg.id];
-            return (<div key={msg.id}>
-              {sd && <div style={S.dateSep}><span style={{ ...S.dateL, backgroundColor: bgPreset.dateBg, color: bgPreset.sub }}>{msg.date}</span></div>}
-              <div style={{ padding: "2px 12px", display: "flex", flexDirection: isSelf ? "row-reverse" : "row", alignItems: "flex-start",
-                backgroundColor: isMasked ? C.dangerBg : "transparent",
-                borderLeft: !isSelf && isMasked ? `3px solid ${C.danger}` : "3px solid transparent",
-                borderRight: isSelf && isMasked ? `3px solid ${C.danger}` : "3px solid transparent",
-                cursor: "pointer", transition: "background-color 0.15s" }}
-                onClick={() => handleMsgTap(msg)}
-                onContextMenu={e => { e.preventDefault(); setPhotoTarget(msg.id); photoRef.current?.click(); }}>
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: isSelf ? "flex-end" : "flex-start" }}>
-                  {su && <div style={{ fontSize: 11, fontWeight: 600, color: nc, marginBottom: 1 }}>{dn(msg.userName)}{isMasked && " 🔒"}</div>}
-                  <div style={{ display: "flex", alignItems: "flex-end", gap: 5, flexDirection: isSelf ? "row-reverse" : "row" }}>
-                    <div style={{ padding: "7px 12px", borderRadius: isSelf ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
-                      backgroundColor: isMasked ? "#eee" : (bubbleColors[msg.userName] || defaultBubbleColor(msg.userName, participants)), maxWidth: "78%", fontSize: 14, lineHeight: 1.45, wordBreak: "break-word" }}>
-                      <MT msg={msg} mFull={mFull} mPart={mPart} />
-                    </div>
-                    <span style={{ fontSize: 10, color: C.textLight }}>{msg.time}</span>
-                  </div>
-                  {photo && <img src={photo} style={{ maxWidth: "70%", borderRadius: 12, marginTop: 4, boxShadow: "0 1px 4px rgba(0,0,0,0.1)" }} />}
-                </div>
-                {isMasked && <div style={{ color: C.danger, fontSize: 14, marginTop: 14, marginLeft: 4 }}>🔒</div>}
-              </div>
-              <div style={{ display: "flex", gap: 6, justifyContent: isSelf ? "flex-end" : "flex-start", padding: "2px 16px" }}>
-                <button onClick={() => { setPhotoTarget(msg.id); photoRef.current?.click(); }}
-                  style={{ backgroundColor: photo ? C.accentBg : C.card, border: `1px solid ${photo ? C.accent : C.border}`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: photo ? C.accent : C.textSub, cursor: "pointer", padding: "3px 10px" }}>
-                  {photo ? "画像変更" : "＋画像"}
-                </button>
-                {photo && <button onClick={() => setPhotos(p => { const n = { ...p }; delete n[msg.id]; return n; })}
-                  style={{ backgroundColor: C.dangerBg, border: `1px solid ${C.danger}`, borderRadius: 20, fontSize: 11, color: C.danger, cursor: "pointer", padding: "3px 10px" }}>削除</button>}
-              </div>
-            </div>); }); })()}
-        </div>
-      </>}
-
-      {tab === "style" && (
-        <div style={{ flex: 1, overflowY: "auto", padding: 16, paddingBottom: 80, backgroundColor: C.bg }}>
           {/* Background color */}
-          <div style={{ marginBottom: 20 }}>
-            <label style={S.editLabel}>🎨 背景色</label>
+          <div style={{ marginBottom: 18 }}>
+            <label style={S.editLabel}>背景色</label>
             <div style={{ display: "flex", gap: 6 }}>
               {BG_PRESETS.map(b => (
                 <button key={b.id} onClick={() => setBgPreset(b)} style={{
@@ -504,13 +480,13 @@ function EditPage({ messages, selfName, participants, onBack, onPreview }) {
           </div>
 
           {/* Bubble color per participant */}
-          <div style={{ marginBottom: 20 }}>
-            <label style={S.editLabel}>💬 吹き出しの色（表示名ごと）</label>
+          <div style={{ marginBottom: 18 }}>
+            <label style={S.editLabel}>💬 吹き出しの色</label>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {participants.map(p => (
-                <div key={p} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", backgroundColor: C.card, borderRadius: 10, border: `1px solid ${C.border}` }}>
+                <div key={p} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", backgroundColor: C.bg, borderRadius: 10, border: `1px solid ${C.border}` }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: C.text, flex: 1 }}>{dn(p)}</span>
-                  <div style={{ display: "flex", gap: 4 }}>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {BUBBLE_PRESETS.map(color => (
                       <button key={color} onClick={() => setBubbleColors(prev => ({ ...prev, [p]: color }))} style={{
                         width: 24, height: 24, borderRadius: "50%", backgroundColor: color,
@@ -525,23 +501,196 @@ function EditPage({ messages, selfName, participants, onBack, onPreview }) {
           </div>
 
           {/* Timestamp */}
-          <label style={{ ...S.editLabel, cursor: "pointer" }}>
+          <label style={{ ...S.editLabel, cursor: "pointer", marginBottom: 10 }}>
             <input type="checkbox" checked={showTs} onChange={e => setShowTs(e.target.checked)} style={{ marginRight: 8, accentColor: C.accent }} />
             ⏰ タイムスタンプを表示
           </label>
         </div>
-      )}
+      </div>
+    </div>
+  );
+}
+
+// ======================================================================
+//  STEP 2: EDIT
+// ======================================================================
+function EditPage({ messages, selfName, participants, onBack, onPreview }) {
+  const [nameMap, setNameMap] = useState(() => { const m = {}; participants.forEach(p => { m[p] = p; }); return m; });
+  const [currentSelf, setCurrentSelf] = useState(selfName);
+  const [mFull, setMFull] = useState(new Set());
+  const [mPart, setMPart] = useState({});
+  const [photos, setPhotos] = useState({});
+  const [bgPreset, setBgPreset] = useState(BG_PRESETS.find(b => b.id === "craft") || BG_PRESETS[0]);
+  const [bubbleColors, setBubbleColors] = useState(() => {
+    const m = {}; participants.forEach(p => { m[p] = p === selfName ? "#DCF8C6" : "#FFFFFF"; }); return m;
+  });
+  const [showTs, setShowTs] = useState(true);
+  const [editingName, setEditingName] = useState(null);
+  const [nameInput, setNameInput] = useState("");
+  const [selectedMsg, setSelectedMsg] = useState(null);
+  const [editedTexts, setEditedTexts] = useState({});
+  const [editingMsg, setEditingMsg] = useState(null);
+  const [partialTarget, setPartialTarget] = useState(null);
+  const [styleSheetOpen, setStyleSheetOpen] = useState(false);
+  const photoRef = useRef(null);
+  const [photoTarget, setPhotoTarget] = useState(null);
+
+  const dn = n => nameMap[n] || n;
+
+  const toggleFullMask = id => {
+    setMPart(p => { const n = { ...p }; delete n[id]; return n; });
+    setMFull(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
+  const unmask = id => {
+    setMFull(p => { const n = new Set(p); n.delete(id); return n; });
+    setMPart(p => { const n = { ...p }; delete n[id]; return n; });
+  };
+  const handlePhotoSelect = e => {
+    const f = e.target.files[0]; if (!f || !photoTarget) return;
+    const r = new FileReader();
+    r.onload = ev => { setPhotos(p => ({ ...p, [photoTarget]: ev.target.result })); setPhotoTarget(null); };
+    r.readAsDataURL(f);
+  };
+  const savePartialMask = ranges => {
+    if (!partialTarget) return;
+    setMFull(p => { const n = new Set(p); n.delete(partialTarget.id); return n; });
+    if (ranges.length > 0) setMPart(p => ({ ...p, [partialTarget.id]: ranges }));
+    else setMPart(p => { const n = { ...p }; delete n[partialTarget.id]; return n; });
+    setPartialTarget(null);
+  };
+  const saveEditedText = (msgId, text) => {
+    const orig = messages.find(m => m.id === msgId);
+    if (orig && text === orig.text) {
+      setEditedTexts(p => { const n = { ...p }; delete n[msgId]; return n; });
+    } else {
+      setEditedTexts(p => ({ ...p, [msgId]: text }));
+    }
+  };
+
+  // Long press / double tap for name edit
+  const nameTimerRef = useRef(null);
+  const handleNameDown = (p) => {
+    nameTimerRef.current = setTimeout(() => { setEditingName(p); setNameInput(nameMap[p] || p); }, 500);
+  };
+  const handleNameUp = () => { clearTimeout(nameTimerRef.current); };
+
+  return (
+    <div style={S.page}>
+      {/* Header */}
+      <div style={S.header}><button style={S.back} onClick={onBack}>←</button>
+        <div style={{ textAlign: "center", flex: 1 }}><h2 style={S.hT}>編集</h2><span style={{ fontSize: 11, color: C.textLight }}>STEP 2</span></div>
+        <div style={{ width: 40 }} /></div>
+
+      {/* 表示名セクション */}
+      <div style={{ padding: "10px 14px", backgroundColor: C.bgDark, borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: C.textSub, marginBottom: 6 }}>✏️ 表示名 <span style={{ fontWeight: 400, fontSize: 11, color: C.textLight }}>タップ：自分切替 ／ 長押し：名前変更</span></div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {participants.map(p => (
+            <button key={p}
+              onClick={() => setCurrentSelf(prev => prev === p ? "" : p)}
+              onPointerDown={() => handleNameDown(p)}
+              onPointerUp={handleNameUp}
+              onPointerLeave={handleNameUp}
+              style={{
+                padding: "5px 10px", borderRadius: 8,
+                border: currentSelf === p ? `2px solid ${C.green}` : `1px solid ${C.border}`,
+                backgroundColor: nameMap[p] !== p ? C.accentBg : C.card,
+                fontSize: 12, cursor: "pointer", color: C.text, position: "relative"
+              }}>
+              {nameMap[p] !== p ? `${nameMap[p]} ← ${p}` : dn(p)}
+              {currentSelf === p && <span style={{
+                position: "absolute", top: -8, right: -4, fontSize: 9, fontWeight: 700,
+                backgroundColor: C.green, color: "#fff", padding: "1px 5px", borderRadius: 8,
+                lineHeight: "14px"
+              }}>あなた</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 本文エリア */}
+      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 110, backgroundColor: bgPreset.bg, transition: "background-color 0.3s" }}>
+        <div style={{ fontSize: 11, color: bgPreset.sub || C.textLight, textAlign: "center", padding: "6px 12px" }}>
+          💡 メッセージをタップして編集・モザイク
+        </div>
+        {(() => { let ld = "", lu = ""; return messages.map(msg => {
+          const sd = msg.date !== ld, su = msg.userName !== lu || sd; ld = msg.date; lu = msg.userName;
+          const isSelf = msg.userName === currentSelf;
+          const isMF = mFull.has(msg.id), isMP = mPart[msg.id] && mPart[msg.id].length > 0, isMasked = isMF || isMP;
+          const isEdited = editedTexts[msg.id] !== undefined;
+          const nc = gnc(msg.userName, participants); const photo = photos[msg.id];
+          const displayMsg = isEdited ? { ...msg, text: editedTexts[msg.id] } : msg;
+          return (<div key={msg.id}>
+            {sd && <div style={S.dateSep}><span style={{ ...S.dateL, backgroundColor: bgPreset.dateBg, color: bgPreset.sub }}>{msg.date}</span></div>}
+            <div style={{ padding: "2px 12px", display: "flex", flexDirection: isSelf ? "row-reverse" : "row", alignItems: "flex-start",
+              backgroundColor: isMasked ? "rgba(196,77,62,0.08)" : "transparent",
+              borderLeft: !isSelf && isMasked ? `3px solid ${C.danger}` : "3px solid transparent",
+              borderRight: isSelf && isMasked ? `3px solid ${C.danger}` : "3px solid transparent",
+              cursor: "pointer", transition: "background-color 0.15s" }}
+              onClick={() => setSelectedMsg(msg)}>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: isSelf ? "flex-end" : "flex-start" }}>
+                {su && <div style={{ fontSize: 11, fontWeight: 600, color: nc, marginBottom: 1 }}>
+                  {dn(msg.userName)}{isMasked && " 🔒"}{isEdited && " ✏️"}
+                </div>}
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 5, flexDirection: isSelf ? "row-reverse" : "row" }}>
+                  <div style={{ padding: "7px 12px", borderRadius: isSelf ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
+                    backgroundColor: isMasked ? "#eee" : (bubbleColors[msg.userName] || defaultBubbleColor(msg.userName, participants)),
+                    maxWidth: "78%", fontSize: 14, lineHeight: 1.45, wordBreak: "break-word", color: "#333" }}>
+                    <MT msg={displayMsg} mFull={mFull} mPart={mPart} />
+                  </div>
+                  <span style={{ fontSize: 10, color: bgPreset.sub || C.textLight }}>{msg.time}</span>
+                </div>
+                {photo && <img src={photo} style={{ maxWidth: "70%", borderRadius: 12, marginTop: 4, boxShadow: "0 1px 4px rgba(0,0,0,0.1)" }} />}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, justifyContent: isSelf ? "flex-end" : "flex-start", padding: "2px 16px" }}>
+              <button onClick={ev => { ev.stopPropagation(); setPhotoTarget(msg.id); photoRef.current?.click(); }}
+                style={{ backgroundColor: photo ? C.accentBg : C.card, border: `1px solid ${photo ? C.accent : C.border}`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: photo ? C.accent : C.textSub, cursor: "pointer", padding: "3px 10px" }}>
+                {photo ? "画像変更" : "＋画像"}
+              </button>
+              {photo && <button onClick={ev => { ev.stopPropagation(); setPhotos(p => { const n = { ...p }; delete n[msg.id]; return n; }); }}
+                style={{ backgroundColor: C.dangerBg, border: `1px solid ${C.danger}`, borderRadius: 20, fontSize: 11, color: C.danger, cursor: "pointer", padding: "3px 10px" }}>削除</button>}
+            </div>
+          </div>); }); })()}
+      </div>
 
       <input ref={photoRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handlePhotoSelect} />
 
-      <div style={S.botBar}><div style={S.botIn}>
-        <div style={{ display: "flex", gap: 10, fontSize: 12 }}>
-          {(mFull.size + Object.keys(mPart).length) > 0 && <span style={{ color: C.danger, fontWeight: 600 }}>🔒 {mFull.size + Object.keys(mPart).length}</span>}
-          {Object.keys(photos).length > 0 && <span style={{ color: C.accent, fontWeight: 600 }}>🖼 {Object.keys(photos).length}</span>}
+      {/* スタイルボタン + 次へボタン */}
+      <div style={{
+        position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480,
+        backgroundColor: C.card, borderTop: `1px solid ${C.border}`, zIndex: 20, boxSizing: "border-box"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", padding: "8px 16px", gap: 8, borderBottom: `1px solid ${C.border}` }}>
+          <button onClick={() => setStyleSheetOpen(true)} style={{
+            flex: 1, padding: "8px 12px", backgroundColor: C.accentBg, border: `1px solid ${C.accentLight}`,
+            borderRadius: 10, fontSize: 13, fontWeight: 600, color: C.accent, cursor: "pointer", textAlign: "center"
+          }}>🎨 スタイル</button>
+          <div style={{ display: "flex", gap: 6, fontSize: 12 }}>
+            {(mFull.size + Object.keys(mPart).length) > 0 && <span style={{ color: C.danger, fontWeight: 600 }}>🔒 {mFull.size + Object.keys(mPart).length}</span>}
+            {Object.keys(editedTexts).length > 0 && <span style={{ color: C.accent, fontWeight: 600 }}>✏️ {Object.keys(editedTexts).length}</span>}
+            {Object.keys(photos).length > 0 && <span style={{ color: C.accent, fontWeight: 600 }}>🖼 {Object.keys(photos).length}</span>}
+          </div>
         </div>
-        <button style={S.priBtn} onClick={() => onPreview({ nameMap, mFull, mPart, photos, bgPreset, bubbleColors, showTs })}>次へ：プレビュー →</button>
-      </div></div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px" }}>
+          <span style={{ fontSize: 12, color: C.textLight }}>{messages.length}件のメッセージ</span>
+          <button style={S.priBtn} onClick={() => onPreview({ nameMap, mFull, mPart, photos, bgPreset, bubbleColors, showTs, editedTexts, currentSelf })}>次へ：プレビュー →</button>
+        </div>
+      </div>
 
+      {/* Action Sheet */}
+      {selectedMsg && <ActionSheet msg={selectedMsg} mFull={mFull} mPart={mPart}
+        onEdit={msg => setEditingMsg(msg)}
+        onFullMask={id => toggleFullMask(id)}
+        onPartialMask={msg => setPartialTarget(msg)}
+        onUnmask={id => unmask(id)}
+        onClose={() => setSelectedMsg(null)} />}
+
+      {/* Text Edit Modal */}
+      {editingMsg && <TextEditModal msg={editingMsg} editedTexts={editedTexts}
+        onSave={saveEditedText} onClose={() => setEditingMsg(null)} />}
+
+      {/* Name Edit Modal */}
       {editingName && (
         <div style={S.overlay} onClick={() => setEditingName(null)}>
           <div style={S.modal} onClick={e => e.stopPropagation()}>
@@ -556,6 +705,15 @@ function EditPage({ messages, selfName, participants, onBack, onPreview }) {
         </div>
       )}
 
+      {/* Style Bottom Sheet */}
+      {styleSheetOpen && <StyleSheet
+        bgPreset={bgPreset} setBgPreset={setBgPreset}
+        bubbleColors={bubbleColors} setBubbleColors={setBubbleColors}
+        showTs={showTs} setShowTs={setShowTs}
+        participants={participants} nameMap={nameMap}
+        onClose={() => setStyleSheetOpen(false)} />}
+
+      {/* Partial Mask Modal */}
       {partialTarget && <PartialMaskModal msg={partialTarget} existing={mPart[partialTarget.id]} onSave={savePartialMask} onClose={() => setPartialTarget(null)} />}
     </div>
   );
@@ -567,8 +725,9 @@ function EditPage({ messages, selfName, participants, onBack, onPreview }) {
 function Preview({ messages, groupName, selfName, participants, editState, onBack, onShare }) {
   const [title, setTitle] = useState("");
   const ref = useRef(null);
-  const { nameMap, mFull, mPart, photos, bgPreset: bg, bubbleColors, showTs } = editState;
+  const { nameMap, mFull, mPart, photos, bgPreset: bg, bubbleColors, showTs, editedTexts = {}, currentSelf } = editState;
   const dn = n => nameMap[n] || n;
+  const effectiveSelf = currentSelf || selfName;
 
   return (
     <div style={S.page}>
@@ -585,11 +744,12 @@ function Preview({ messages, groupName, selfName, participants, editState, onBac
           <div style={{ padding: "4px 12px 12px" }}>
             {(() => { let ld = "", lu = ""; return messages.map(msg => {
               const sd = msg.date !== ld, su = msg.userName !== lu || sd; ld = msg.date; lu = msg.userName;
-              const isSelf = msg.userName === selfName;
+              const isSelf = msg.userName === effectiveSelf;
               const nc = gnc(msg.userName, participants);
               const isMF = mFull.has(msg.id), isMP = mPart[msg.id] && mPart[msg.id].length > 0, isMasked = isMF || isMP;
               const photo = photos[msg.id];
               const bColor = bubbleColors[msg.userName] || defaultBubbleColor(msg.userName, participants);
+              const displayMsg = editedTexts[msg.id] !== undefined ? { ...msg, text: editedTexts[msg.id] } : msg;
               return (<div key={msg.id}>
                 {sd && <div style={{ textAlign: "center", fontSize: 11, padding: "4px 0", margin: "8px 0", borderRadius: 8, backgroundColor: bg.dateBg, color: bg.sub }}>{msg.date}</div>}
                 <div style={{ display: "flex", marginBottom: 5, flexDirection: isSelf ? "row-reverse" : "row" }}>
@@ -602,7 +762,7 @@ function Preview({ messages, groupName, selfName, participants, editState, onBac
                         backgroundColor: isMasked ? (bg.id === "dark" ? "#1a1a1a" : "#e8e8e8") : bColor,
                         borderRadius: isSelf ? "16px 16px 4px 16px" : "16px 16px 16px 4px"
                       }}>
-                        <MT msg={msg} mFull={mFull} mPart={mPart} />
+                        <MT msg={displayMsg} mFull={mFull} mPart={mPart} />
                       </div>
                       {showTs && <span style={{ fontSize: 10, color: bg.sub, flexShrink: 0 }}>{msg.time}</span>}
                     </div>
@@ -710,9 +870,9 @@ export default function App() {
 // ======================================================================
 const S = {
   app: { maxWidth: 480, margin: "0 auto", minHeight: "100vh", backgroundColor: C.bg, fontFamily: '-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif', position: "relative", overflow: "hidden" },
-  homePage: { minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", padding: "20px 16px 40px", background: `linear-gradient(180deg, ${C.bg} 0%, ${C.bgDark} 100%)` },
+  homePage: { minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", padding: "20px 16px 40px", background: `linear-gradient(180deg, ${C.bg} 0%, ${C.bgDark} 100%)`, overflowY: "auto" },
   homeContent: { width: "100%", maxWidth: 400 },
-  uploadArea: { border: `2px dashed ${C.accentLight}`, borderRadius: 16, padding: "28px 20px", textAlign: "center", cursor: "pointer", transition: "all 0.2s", backgroundColor: C.card },
+  uploadArea: { border: `2px dashed ${C.accentLight}`, borderRadius: 16, padding: "18px 16px", textAlign: "center", cursor: "pointer", transition: "all 0.2s", backgroundColor: C.card },
   errBox: { marginTop: 12, padding: "10px 16px", backgroundColor: C.dangerBg, color: C.danger, borderRadius: 8, fontSize: 13 },
   divider: { display: "flex", alignItems: "center", margin: "20px 0", gap: 10 },
   divLine: { flex: 1, height: 1, backgroundColor: C.border },
